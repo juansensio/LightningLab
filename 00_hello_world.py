@@ -1,3 +1,6 @@
+# shortcut to install torchvision without a requirements.txt
+# !pip install torchvision
+
 import lightning as L
 import os
 

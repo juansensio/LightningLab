@@ -9,6 +9,7 @@ from torch.nn import AvgPool2d as A
 from torch.nn import Linear as Li
 from torch.nn import Flatten as F
 import torchvision.transforms as transforms
+import os
 
 class LeNet5(torch.nn.Module):
   def __init__(self, n_channels=3, n_outputs=10):
@@ -24,8 +25,8 @@ class PyTorchComponent(L.LightningWork):
         transforms.ToTensor(),
         transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
     ])
-    trainset = torchvision.datasets.CIFAR10(root='./data', train=True, download=False, transform=transform)
-    testset = torchvision.datasets.CIFAR10(root='./data', train=False, download=False, transform=transform)
+    trainset = torchvision.datasets.CIFAR10(root='./data', train=True, download=True, transform=transform)
+    testset = torchvision.datasets.CIFAR10(root='./data', train=False, download=True, transform=transform)
     dataloaders = {
         'train': torch.utils.data.DataLoader(trainset, batch_size=512, shuffle=True, num_workers=10, pin_memory=True),
         'val': torch.utils.data.DataLoader(testset, batch_size=512, shuffle=False, num_workers=10, pin_memory=True),
@@ -51,8 +52,10 @@ class PyTorchComponent(L.LightningWork):
                     l.append(loss.item())
                     m.append((output.argmax(1)==y).float().mean().item())
             print(f'epoch: {epoch}, phase: {phase}, loss: {np.mean(l):.5f} accuracy: {np.mean(m):.5f}')
+    os.makedirs('outputs', exist_ok=True)
+    torch.save(model.state_dict(), 'outputs/model.pt')
 
 
-compute = L.CloudCompute('gpu')
+compute = L.CloudCompute('gpu', wait_timeout=60, spot=True)
 componet = PyTorchComponent(cloud_compute=compute)
 app = L.LightningApp(componet)
