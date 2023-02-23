@@ -1,18 +1,58 @@
 import lightning as L
-from lightning.app.components import LightningTrainerMultiNode
-from lightning.pytorch.demos.boring_classes import BoringModel
+import torch
+import torchvision
+import numpy as np
+from torch.nn import Sequential as S
+from torch.nn import Conv2d as C
+from torch.nn import Tanh as T
+from torch.nn import AvgPool2d as A
+from torch.nn import Linear as Li
+from torch.nn import Flatten as F
+import torchvision.transforms as transforms
+
+class LeNet5(torch.nn.Module):
+  def __init__(self, n_channels=3, n_outputs=10):
+    super().__init__()
+    block = lambda ci,co,k=5: S(C(ci,co,k),T(),A(2,2))
+    self.model = S(block(n_channels, 6),block(6, 16),S(C(16,120,5),T(),F(),Li(120,84),T(),Li(84,n_outputs)))
+  def forward(self, x):
+    return self.model(x)
+
+class PyTorchComponent(L.LightningWork):
+   def run(self):
+    transform = transforms.Compose([
+        transforms.ToTensor(),
+        transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
+    ])
+    trainset = torchvision.datasets.CIFAR10(root='./data', train=True, download=False, transform=transform)
+    testset = torchvision.datasets.CIFAR10(root='./data', train=False, download=False, transform=transform)
+    dataloaders = {
+        'train': torch.utils.data.DataLoader(trainset, batch_size=512, shuffle=True, num_workers=10, pin_memory=True),
+        'val': torch.utils.data.DataLoader(testset, batch_size=512, shuffle=False, num_workers=10, pin_memory=True),
+    }
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    model = LeNet5().to(device)
+    optimizer = torch.optim.Adam(model.parameters())
+    criterion = torch.nn.CrossEntropyLoss()
+    for epoch in range(10):
+        for phase in ['train', 'val']:
+            if phase == 'train': model.train()
+            else: model.eval()
+            l,m=[],[]
+            for x,y in dataloaders[phase]:
+                x,y = x.to(device),y.to(device)
+                model.zero_grad()
+                with torch.set_grad_enabled(phase == 'train'):
+                    output = model(x)
+                    loss = criterion(output, y)
+                    if phase == 'train':
+                        loss.backward()
+                        optimizer.step()
+                    l.append(loss.item())
+                    m.append((output.argmax(1)==y).float().mean().item())
+            print(f'epoch: {epoch}, phase: {phase}, loss: {np.mean(l):.5f} accuracy: {np.mean(m):.5f}')
 
 
-class LightningTrainerDistributed(L.LightningWork):
-    def run(self):
-        model = BoringModel()
-        trainer = L.Trainer(max_epochs=10, strategy="ddp")
-        trainer.fit(model)
-
-# 8 GPUs: (2 nodes of 4 x v100)
-component = LightningTrainerMultiNode(
-    LightningTrainerDistributed,
-    num_nodes=4,
-    cloud_compute=L.CloudCompute("gpu-fast-multi"), # 4 x v100
-)
-app = L.LightningApp(component)
+compute = L.CloudCompute('gpu')
+componet = PyTorchComponent(cloud_compute=compute)
+app = L.LightningApp(componet)
